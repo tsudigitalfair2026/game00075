@@ -1,0 +1,535 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no">
+<title>🎪 ピエロ大脱出DX</title>
+
+<style>
+*{
+margin:0;
+padding:0;
+box-sizing:border-box;
+-webkit-tap-highlight-color:transparent;
+}
+
+html,body{
+width:100%;
+height:100%;
+overflow:hidden;
+font-family:sans-serif;
+background:#111;
+color:#fff;
+touch-action:none;
+user-select:none;
+}
+
+.screen{
+display:none;
+width:100%;
+height:100%;
+padding:20px;
+flex-direction:column;
+justify-content:center;
+align-items:center;
+text-align:center;
+}
+
+.active{
+display:flex;
+}
+
+h1{
+font-size:2rem;
+color:#ffd700;
+margin-bottom:15px;
+}
+
+p{
+margin:6px 0;
+line-height:1.5;
+}
+
+button{
+border:none;
+border-radius:14px;
+background:#ff5722;
+color:#fff;
+font-size:1.2rem;
+padding:18px 28px;
+min-width:220px;
+margin-top:15px;
+}
+
+#gameScreen{
+padding:0;
+justify-content:flex-start;
+}
+
+#hud{
+height:60px;
+width:100%;
+display:flex;
+justify-content:space-between;
+align-items:center;
+padding:10px;
+background:#222;
+font-size:1rem;
+font-weight:bold;
+}
+
+#gameArea{
+position:relative;
+width:100%;
+height:calc(100vh - 60px);
+overflow:hidden;
+background:linear-gradient(#4ca8ff,#c5ecff);
+}
+
+#player{
+position:absolute;
+font-size:46px;
+left:50%;
+bottom:20px;
+transform:translateX(-50%);
+z-index:10;
+}
+
+.obstacle{
+position:absolute;
+font-size:42px;
+}
+
+.item{
+position:absolute;
+font-size:38px;
+}
+
+#lifeDisplay{
+color:#7CFF7C;
+}
+
+#rank{
+font-size:2rem;
+color:#ffd700;
+margin:15px 0;
+}
+
+.invincible{
+filter:drop-shadow(0 0 12px gold);
+animation:blink .25s infinite;
+}
+
+@keyframes blink{
+50%{
+opacity:.55;
+}
+}
+</style>
+</head>
+
+<body>
+
+<div id="startScreen" class="screen active">
+<h1>🎪 ピエロ大脱出DX</h1>
+<p>左右へドラッグして移動！</p>
+<p>💣🔥⚡🪨をよけよう！</p>
+<p>❤️でライフ回復！</p>
+<p>⭐で5秒間無敵！</p>
+<p>30秒生き残ればクリア！</p>
+<p>難易度：超むずかしい</p>
+<button id="startBtn">スタート</button>
+</div>
+
+<div id="gameScreen" class="screen">
+
+<div id="hud">
+<div>得点:<span id="score">0</span></div>
+<div id="lifeDisplay">❤️×3</div>
+<div>残り:<span id="time">30</span>秒</div>
+</div>
+
+<div id="gameArea">
+<div id="player">🤡</div>
+</div>
+
+</div>
+
+<div id="resultScreen" class="screen">
+<h1>結果発表</h1>
+<p>最終スコア</p>
+<h2 id="finalScore">0</h2>
+<div id="rank">C</div>
+<button id="retryBtn">もう一度遊ぶ</button>
+</div>
+
+<script>
+const startScreen=document.getElementById("startScreen");
+const gameScreen=document.getElementById("gameScreen");
+const resultScreen=document.getElementById("resultScreen");
+
+const gameArea=document.getElementById("gameArea");
+const player=document.getElementById("player");
+
+const scoreEl=document.getElementById("score");
+const timeEl=document.getElementById("time");
+const lifeEl=document.getElementById("lifeDisplay");
+
+const finalScore=document.getElementById("finalScore");
+const rankEl=document.getElementById("rank");
+
+const startBtn=document.getElementById("startBtn");
+const retryBtn=document.getElementById("retryBtn");
+
+let running=false;
+let score=0;
+let life=3;
+let timeLeft=30;
+
+let areaWidth=0;
+let areaHeight=0;
+
+let playerX=0;
+
+let obstacles=[];
+let items=[];
+
+let animationId=null;
+let spawnTimer=null;
+let itemTimer=null;
+let countdownTimer=null;
+let difficultyTimer=null;
+
+let speedBonus=0;
+
+let invincible=false;
+let invincibleTimer=null;
+
+function showScreen(screen){
+startScreen.classList.remove("active");
+gameScreen.classList.remove("active");
+resultScreen.classList.remove("active");
+screen.classList.add("active");
+}
+
+function updateLife(){
+lifeEl.textContent="❤️×"+life;
+}
+
+function clearGameObjects(){
+
+obstacles.forEach(o=>{
+if(o.el.parentNode)o.el.remove();
+});
+
+items.forEach(i=>{
+if(i.el.parentNode)i.el.remove();
+});
+
+obstacles=[];
+items=[];
+}
+
+function startGame(){
+
+cancelAnimationFrame(animationId);
+
+clearInterval(spawnTimer);
+clearInterval(itemTimer);
+clearInterval(countdownTimer);
+clearInterval(difficultyTimer);
+clearTimeout(invincibleTimer);
+
+clearGameObjects();
+
+running=true;
+
+score=0;
+life=3;
+timeLeft=30;
+speedBonus=0;
+
+invincible=false;
+player.classList.remove("invincible");
+
+scoreEl.textContent=0;
+timeEl.textContent=30;
+
+updateLife();
+
+showScreen(gameScreen);
+
+areaWidth=gameArea.clientWidth;
+areaHeight=gameArea.clientHeight;
+
+playerX=(areaWidth/2)-25;
+player.style.left=playerX+"px";
+
+spawnTimer=setInterval(spawnObstacle,180);
+
+itemTimer=setInterval(spawnItem,3500);
+
+difficultyTimer=setInterval(()=>{
+speedBonus+=0.7;
+},3000);
+
+countdownTimer=setInterval(()=>{
+
+timeLeft--;
+timeEl.textContent=timeLeft;
+
+if(timeLeft<=0){
+finishGame(true);
+}
+
+},1000);
+
+animationId=requestAnimationFrame(gameLoop);
+}
+
+function spawnObstacle(){
+
+if(!running)return;
+
+const el=document.createElement("div");
+
+const list=["💣","🔥","⚡","🪨","🧨"];
+
+el.className="obstacle";
+el.textContent=list[Math.floor(Math.random()*list.length)];
+
+const x=Math.random()*(areaWidth-50);
+
+el.style.left=x+"px";
+el.style.top="-60px";
+
+gameArea.appendChild(el);
+
+obstacles.push({
+el,
+x,
+y:-60,
+speed:(7+Math.random()*6)+speedBonus
+});
+}
+
+function spawnItem(){
+
+if(!running)return;
+
+const el=document.createElement("div");
+
+let type=Math.random()<0.7?"heart":"star";
+
+el.className="item";
+
+if(type==="heart"){
+el.textContent="❤️";
+}else{
+el.textContent="⭐";
+}
+
+const x=Math.random()*(areaWidth-50);
+
+el.style.left=x+"px";
+el.style.top="-50px";
+
+gameArea.appendChild(el);
+
+items.push({
+el,
+x,
+y:-50,
+type,
+speed:5+speedBonus*0.5
+});
+}
+
+function activateInvincible(){
+
+invincible=true;
+player.classList.add("invincible");
+
+clearTimeout(invincibleTimer);
+
+invincibleTimer=setTimeout(()=>{
+invincible=false;
+player.classList.remove("invincible");
+},5000);
+}
+
+function hitObstacle(index){
+
+if(invincible){
+obstacles[index].el.remove();
+obstacles.splice(index,1);
+score+=2;
+scoreEl.textContent=score;
+return;
+}
+
+life--;
+updateLife();
+
+obstacles[index].el.remove();
+obstacles.splice(index,1);
+
+if(life<=0){
+finishGame(false);
+}
+}
+
+function gameLoop(){
+
+if(!running)return;
+
+const playerY=areaHeight-90;
+
+for(let i=obstacles.length-1;i>=0;i--){
+
+const o=obstacles[i];
+
+o.y+=o.speed;
+
+o.el.style.top=o.y+"px";
+
+if(
+o.x<playerX+38 &&
+o.x+38>playerX &&
+o.y<playerY+40 &&
+o.y+40>playerY
+){
+hitObstacle(i);
+continue;
+}
+
+if(o.y>areaHeight+60){
+
+o.el.remove();
+obstacles.splice(i,1);
+
+score++;
+scoreEl.textContent=score;
+}
+}
+
+for(let i=items.length-1;i>=0;i--){
+
+const item=items[i];
+
+item.y+=item.speed;
+
+item.el.style.top=item.y+"px";
+
+if(
+item.x<playerX+40 &&
+item.x+40>playerX &&
+item.y<playerY+40 &&
+item.y+40>playerY
+){
+
+if(item.type==="heart"){
+life=Math.min(5,life+1);
+updateLife();
+}
+
+if(item.type==="star"){
+activateInvincible();
+}
+
+item.el.remove();
+items.splice(i,1);
+continue;
+}
+
+if(item.y>areaHeight+60){
+item.el.remove();
+items.splice(i,1);
+}
+}
+
+animationId=requestAnimationFrame(gameLoop);
+}
+
+function finishGame(clear){
+
+if(!running)return;
+
+running=false;
+
+cancelAnimationFrame(animationId);
+
+clearInterval(spawnTimer);
+clearInterval(itemTimer);
+clearInterval(countdownTimer);
+clearInterval(difficultyTimer);
+clearTimeout(invincibleTimer);
+
+finalScore.textContent=score;
+
+let rank="D";
+
+if(score>=30) rank="C";
+if(score>=60) rank="B";
+if(score>=90) rank="A";
+if(score>=120) rank="S";
+
+if(clear){
+rank+=" 🎉";
+}
+
+rankEl.textContent="ランク "+rank;
+
+showScreen(resultScreen);
+}
+
+function movePlayer(clientX){
+
+if(!running)return;
+
+const rect=gameArea.getBoundingClientRect();
+
+playerX=clientX-rect.left-23;
+
+if(playerX<0) playerX=0;
+if(playerX>areaWidth-46) playerX=areaWidth-46;
+
+player.style.left=playerX+"px";
+}
+
+gameArea.addEventListener("touchstart",e=>{
+movePlayer(e.touches[0].clientX);
+},{passive:false});
+
+gameArea.addEventListener("touchmove",e=>{
+e.preventDefault();
+movePlayer(e.touches[0].clientX);
+},{passive:false});
+
+gameArea.addEventListener("mousedown",e=>{
+
+movePlayer(e.clientX);
+
+function drag(ev){
+movePlayer(ev.clientX);
+}
+
+function stop(){
+window.removeEventListener("mousemove",drag);
+window.removeEventListener("mouseup",stop);
+}
+
+window.addEventListener("mousemove",drag);
+window.addEventListener("mouseup",stop);
+});
+
+startBtn.addEventListener("click",startGame);
+retryBtn.addEventListener("click",startGame);
+
+document.addEventListener("gesturestart",e=>{
+e.preventDefault();
+});
+</script>
+
+</body>
+</html>
